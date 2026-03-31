@@ -88,14 +88,14 @@ Internal Tor Routing (Default)
 The program is pre-configured to use socks5h://127.0.0.1:9050 internally to prevent DNS leaks.
 ```Bash
 
-python3 ultra_analyzer.py
+python3 ultra_analyzer.py "url"
+python3 ultr_analyzer.py "url1 url2 url3"
 ```
-Using with Proxychains4
+Using with url list file. first create the list file in program root directory and enter the needed url list in one by one.
 
-If you have set use_tor=False in the script to let the OS handle routing:
 ```Bash
-
-proxychains4 python3 ultra_analyzer.py
+touch list.txt
+python3 ultra_analyzer.py list.txt
 ```
 
 Real-World Use Cases
