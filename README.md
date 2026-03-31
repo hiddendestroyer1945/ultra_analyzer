@@ -65,7 +65,7 @@ ss -antlp | grep 9050
 📦 Setting Up the Project
 1. Clone & Virtual Environment
 ```Bash
-git clone [https://github.com/hiddendestroyer1945/ultra_analyzer.git](https://github.com/hiddendestroyer1945/ultra_analyzer.git)
+git clone https://github.com/hiddendestroyer1945/ultra_analyzer.git
 cd ultra_analyzer
 ```
 
