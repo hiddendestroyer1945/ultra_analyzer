@@ -3,34 +3,45 @@ import json
 import os
 import re
 import logging
+import sys
 from datetime import datetime
 from colorama import Fore, init
 from playwright.async_api import async_playwright
 
-# Setup Professional Logging
+# --- INITIALIZATION ---
+# 1. Create the directory BEFORE logging starts to avoid the FileNotFoundError
+REPORT_DIR = "reports"
+if not os.path.exists(REPORT_DIR):
+    os.makedirs(REPORT_DIR)
+
+# 2. Setup Logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    filename='reports/audit.log'
+    filename=os.path.join(REPORT_DIR, 'audit.log')
 )
 init(autoreset=True)
 
 class UltraAnalyzer:
     def __init__(self, use_tor=True, max_concurrency=3):
-        self.report_dir = "reports"
+        self.report_dir = REPORT_DIR
         self.output_file = os.path.join(self.report_dir, "report.jsonl")
         self.max_concurrency = max_concurrency
         self.semaphore = asyncio.Semaphore(max_concurrency)
-        # Playwright Tor Proxy format
+        
+        # SOCKS5h ensures DNS is resolved by the proxy (Tor), preventing DNS leaks.
         self.proxy_server = "socks5://127.0.0.1:9050" if use_tor else None
         
-        os.makedirs(self.report_dir, exist_ok=True)
-        
-        with open('fingerprints.json', 'r') as f:
-            self.fingerprints = json.load(f)
+        # Load Fingerprints with error handling
+        try:
+            with open('fingerprints.json', 'r') as f:
+                self.fingerprints = json.load(f)
+        except FileNotFoundError:
+            print(f"{Fore.RED}[!] Critical: fingerprints.json not found.")
+            sys.exit(1)
 
     async def analyze_with_browser(self, browser_context, url):
-        """Renders JS and analyzes the DOM + Headers."""
+        """Bounded worker that manages a single browser page."""
         async with self.semaphore:
             result = {
                 "url": url,
@@ -40,19 +51,27 @@ class UltraAnalyzer:
             }
             
             page = await browser_context.new_page()
-            print(f"{Fore.CYAN}[*] Rendering JS for: {url}")
+            # Set a realistic User-Agent to avoid basic bot detection
+            await page.set_extra_http_headers({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            })
+
+            print(f"{Fore.CYAN}[*] Analyzing: {url}")
             
             try:
-                # Intercept responses to check headers
+                # Attach header listener
                 page.on("response", lambda res: self.check_headers(res, result))
                 
-                await page.goto(url, wait_until="networkidle", timeout=30000)
+                # Navigate and wait for network to settle
+                await page.goto(url, wait_until="networkidle", timeout=45000)
+                
+                # Get fully rendered HTML
                 content = await page.content()
                 result["status"] = "online"
 
-                # Run Body Fingerprints on fully rendered HTML
+                # Run Body Fingerprints
                 for fp in self.fingerprints:
-                    if fp["type"] == "body":
+                    if fp.get("type") == "body":
                         if re.search(fp["pattern"], content, re.I):
                             version = None
                             if fp.get("version"):
@@ -63,34 +82,54 @@ class UltraAnalyzer:
                                 result["detections"].append({"plugin": fp["name"], "version": version})
 
             except Exception as e:
-                logging.error(f"Browser Error {url}: {e}")
-                result["status"] = "error"
+                logging.error(f"Scan failed for {url}: {str(e)}")
+                result["status"] = f"error: {type(e).__name__}"
             finally:
                 await page.close()
                 return result
 
     def check_headers(self, response, result):
-        """Callback to analyze headers during page load."""
+        """Header analysis callback logic."""
         for fp in self.fingerprints:
-            if fp["type"] == "header":
-                value = response.headers.get(fp["key"].lower(), "")
+            if fp.get("type") == "header":
+                # Ensure key is lowercased for comparison
+                header_val = response.headers.get(fp["key"].lower(), "")
+                if not header_val:
+                    continue
+
+                match_found = False
+                version = None
+
                 if fp.get("pattern"):
-                    m = re.search(fp["pattern"], value, re.I)
-                    if m and not any(d['plugin'] == fp['name'] for d in result["detections"]):
+                    m = re.search(fp["pattern"], header_val, re.I)
+                    if m:
+                        match_found = True
                         version = m.group(1) if m.groups() else None
-                        result["detections"].append({"plugin": fp["name"], "version": version})
-                elif value and not any(d['plugin'] == fp['name'] for d in result["detections"]):
-                    result["detections"].append({"plugin": fp["name"], "value": value})
+                else:
+                    match_found = True
+
+                if match_found:
+                    if not any(d['plugin'] == fp['name'] for d in result["detections"]):
+                        result["detections"].append({
+                            "plugin": fp["name"], 
+                            "version": version,
+                            "value": header_val if not version else None
+                        })
 
     async def run(self, urls):
-        print(f"{Fore.YELLOW}[!] Launching Headless Chromium Engine via Tor...")
+        """Main orchestrator for the Playwright session."""
+        if not urls:
+            print(f"{Fore.RED}[!] No targets provided.")
+            return
+
+        print(f"{Fore.YELLOW}[!] Engine Active. Concurrency: {self.max_concurrency} | Proxy: {self.proxy_server}")
         
         async with async_playwright() as p:
-            # Launch browser with Tor Proxy
             browser = await p.chromium.launch(
                 headless=True,
                 proxy={"server": self.proxy_server} if self.proxy_server else None
             )
+            # Create a shared context for all pages
             context = await browser.new_context(ignore_https_errors=True)
 
             tasks = [self.analyze_with_browser(context, url) for url in urls]
@@ -98,22 +137,34 @@ class UltraAnalyzer:
             for task in asyncio.as_completed(tasks):
                 analysis = await task
                 
-                # Atomic Save
+                # Append result to JSONL immediately
                 with open(self.output_file, "a") as f:
                     f.write(json.dumps(analysis) + "\n")
                 
-                if analysis["detections"]:
-                    plugins = [d['plugin'] for d in analysis["detections"]]
-                    print(f"{Fore.GREEN}[+] {analysis['url']}: {', '.join(plugins)}")
+                # Console Output
+                if analysis.get("detections"):
+                    found = [d['plugin'] for d in analysis["detections"]]
+                    print(f"{Fore.GREEN}[+] {analysis['url']} -> {', '.join(found)}")
                 else:
-                    print(f"{Fore.WHITE}[-] {analysis['url']}: No matches")
+                    print(f"{Fore.WHITE}[-] {analysis['url']} -> No detections")
 
             await browser.close()
 
 if __name__ == "__main__":
-    targets = ["https://wordpress.org", "https://reactjs.org"]
+    # Example Target List
+    TARGET_LIST = [
+        "https://wordpress.org",
+        "https://reactjs.org",
+        "https://nginx.org"
+    ]
     
-    # max_concurrency should be low (2-5) for browser-based tools 
-    # because Chromium consumes significant RAM/CPU.
-    scanner = UltraAnalyzer(use_tor=True, max_concurrency=2)
-    asyncio.run(scanner.run(targets))
+    # Setup Analyzer
+    # Note: max_concurrency > 5 can be heavy on RAM when using Browsers.
+    scanner = UltraAnalyzer(use_tor=True, max_concurrency=3)
+    
+    try:
+        asyncio.run(scanner.run(TARGET_LIST))
+    except KeyboardInterrupt:
+        print(f"\n{Fore.RED}[!] Scan interrupted by user.")
+    finally:
+        print(f"{Fore.YELLOW}[***] Audit complete. Results: {os.path.abspath(REPORT_DIR)}")
