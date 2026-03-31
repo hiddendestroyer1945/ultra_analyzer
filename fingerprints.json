@@ -1,0 +1,84 @@
+[
+    {
+        "name": "Server: Nginx",
+        "type": "header",
+        "key": "Server",
+        "pattern": "nginx/?([\\d\\.]+)"
+    },
+    {
+        "name": "Server: Apache",
+        "type": "header",
+        "key": "Server",
+        "pattern": "Apache/?([\\d\\.]+)"
+    },
+    {
+        "name": "Server: Cloudflare",
+        "type": "header",
+        "key": "Server",
+        "pattern": "cloudflare"
+    },
+    {
+        "name": "CMS: WordPress",
+        "type": "body",
+        "pattern": "wp-content|wp-includes",
+        "version": "content=\"WordPress (\\d+\\.\\d+\\.\\d+)\""
+    },
+    {
+        "name": "CMS: Joomla",
+        "type": "body",
+        "pattern": "content=\"Joomla! - Open Source Content Management\""
+    },
+    {
+        "name": "CMS: Drupal",
+        "type": "header",
+        "key": "X-Generator",
+        "pattern": "Drupal (\\d+)"
+    },
+    {
+        "name": "Framework: React",
+        "type": "body",
+        "pattern": "data-reactroot|_reactRootContainer"
+    },
+    {
+        "name": "Framework: Vue.js",
+        "type": "body",
+        "pattern": "v-server-rendered|__vue__"
+    },
+    {
+        "name": "Language: PHP",
+        "type": "header",
+        "key": "X-Powered-By",
+        "pattern": "PHP/?([\\d\\.]+)"
+    },
+    {
+        "name": "Language: ASP.NET",
+        "type": "header",
+        "key": "X-Powered-By",
+        "pattern": "ASP.NET"
+    },
+    {
+        "name": "Library: jQuery",
+        "type": "body",
+        "pattern": "jquery[.-]([\\d\\.]+)?\\.min\\.js"
+    },
+    {
+        "name": "Library: FontAwesome",
+        "type": "body",
+        "pattern": "fontawesome"
+    },
+    {
+        "name": "Security: HSTS",
+        "type": "header",
+        "key": "Strict-Transport-Security"
+    },
+    {
+        "name": "Security: XSS-Protection",
+        "type": "header",
+        "key": "X-XSS-Protection"
+    },
+    {
+        "name": "Analytics: Google-Analytics",
+        "type": "body",
+        "pattern": "google-analytics\\.com/analytics\\.js"
+    }
+]

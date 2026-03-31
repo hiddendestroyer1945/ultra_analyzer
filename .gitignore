@@ -1,0 +1,5 @@
+# --- Application Data ---
+# Block all scan results and audit logs
+reports/
+*.jsonl
+*.log
